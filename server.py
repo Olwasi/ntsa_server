@@ -5,6 +5,7 @@ NTSA Lane Violation Cloud Server
 - Serves a live NTSA dashboard at /
 - Sends email to the driver on every fine (violation >= 3)
 - Pre-seeded with dummy vehicle KAA123B for demo purposes
+- REMEMBER: Stays on selected vehicle tab after auto-refresh
 """
 
 import os
@@ -164,7 +165,7 @@ def receive_violation():
 
 
 # ─────────────────────────────────────────────────────────────────
-# DASHBOARD  –  auto-refreshes every 5 seconds
+# DASHBOARD  –  auto-refreshes every 5 seconds (stays on selected tab)
 # ─────────────────────────────────────────────────────────────────
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -581,12 +582,14 @@ DASHBOARD_HTML = """
     }
   });
 
-  // ── Tab switching ──────────────────────────────────────────────
+  // ── Tab switching with memory ─────────────────────────────────
   function showTab(plate, el) {
     document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-' + plate).style.display = 'block';
     el.classList.add('active');
+    // Save selected tab to localStorage
+    localStorage.setItem('selectedTab', plate);
   }
 
   // ── Image modal ────────────────────────────────────────────────
@@ -597,6 +600,20 @@ DASHBOARD_HTML = """
   function closeModal() {
     document.getElementById('modal').classList.remove('open');
   }
+
+  // ── Restore previously selected tab after refresh ─────────────
+  window.addEventListener('DOMContentLoaded', function() {
+    const savedTab = localStorage.getItem('selectedTab');
+    if (savedTab) {
+      const tabs = document.querySelectorAll('.tab');
+      for (let tab of tabs) {
+        if (tab.innerText === savedTab) {
+          showTab(savedTab, tab);
+          break;
+        }
+      }
+    }
+  });
 </script>
 </body>
 </html>
