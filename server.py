@@ -1,172 +1,3 @@
-"""
-NTSA Lane Violation Cloud Server
-==================================
-- Receives violation reports from the Pi via POST /api/violation
-- Serves a live NTSA dashboard at /
-- Sends email to the driver on every fine (violation >= 3)
-- Pre-seeded with dummy vehicle KAA123B for demo purposes
-- REMEMBER: Stays on selected vehicle tab after auto-refresh
-"""
-
-import os
-import base64
-import smtplib
-import datetime
-import threading
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
-from flask import Flask, request, jsonify, render_template_string
-
-app = Flask(__name__)
-
-# ─────────────────────────────────────────────────────────────────
-# CONFIGURATION  –  set these as environment variables on Render
-# ─────────────────────────────────────────────────────────────────
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS",      "your_email@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "xxxx xxxx xxxx xxxx")
-
-# ─────────────────────────────────────────────────────────────────
-# IN-MEMORY VIOLATION STORE
-# violations = { "KBQ987D": [ {...}, {...} ], "KAA123B": [ {...} ] }
-# ─────────────────────────────────────────────────────────────────
-store_lock = threading.Lock()
-violations = {}
-
-def _seed_dummy():
-    """Pre-seed dummy vehicle KAA123B with realistic violations."""
-    dummy_plate = "KAA123B"
-    dummy_email = "dummy.driver@example.com"
-    base_date   = datetime.date.today().strftime("%Y-%m-%d")
-    dummy_data  = [
-        {
-            "fine_ref":           f"NTSA-{base_date}-KAA123B-0001",
-            "vehicle_plate":      dummy_plate,
-            "driver_email":       dummy_email,
-            "date":               base_date,
-            "time":               "08:14:32",
-            "session_violations": 3,
-            "total_violations":   3,
-            "offence":            "Illegal crossing of yellow continuous centre line",
-            "image_b64":          "",
-        },
-        {
-            "fine_ref":           f"NTSA-{base_date}-KAA123B-0002",
-            "vehicle_plate":      dummy_plate,
-            "driver_email":       dummy_email,
-            "date":               base_date,
-            "time":               "09:47:10",
-            "session_violations": 4,
-            "total_violations":   4,
-            "offence":            "Illegal crossing of yellow continuous centre line",
-            "image_b64":          "",
-        },
-        {
-            "fine_ref":           f"WARN-{base_date}-KAA123B-0003",
-            "vehicle_plate":      dummy_plate,
-            "driver_email":       dummy_email,
-            "date":               base_date,
-            "time":               "11:02:55",
-            "session_violations": 1,
-            "total_violations":   5,
-            "offence":            "Illegal crossing of yellow continuous centre line",
-            "image_b64":          "",
-        },
-    ]
-    violations[dummy_plate] = dummy_data
-
-_seed_dummy()
-
-
-# ─────────────────────────────────────────────────────────────────
-# EMAIL HELPER
-# ─────────────────────────────────────────────────────────────────
-def send_driver_email(violation):
-    """Send violation notice to the driver. Runs in a background thread."""
-    try:
-        fine_ref    = violation["fine_ref"]
-        plate       = violation["vehicle_plate"]
-        driver_email = violation["driver_email"]
-        date_s      = violation["date"]
-        time_s      = violation["time"]
-        total_v     = violation["total_violations"]
-        image_b64   = violation.get("image_b64", "")
-
-        subject = f"NTSA Fine Notice – {fine_ref} – Vehicle {plate}"
-
-        body = f"""Dear Driver,
-
-This is an official notice from the National Transport and Safety Authority (NTSA).
-
-Your vehicle ({plate}) has been recorded committing a traffic violation.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Fine Reference : {fine_ref}
-Date           : {date_s}
-Time           : {time_s}
-Vehicle        : {plate}
-Total Violations on Record : {total_v}
-Offence        : Illegal crossing of yellow continuous centre line
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Photographic evidence of the violation is attached to this email.
-
-Please ensure compliance with all road markings and traffic regulations.
-Repeated violations may result in licence suspension.
-
-NTSA Traffic Monitoring Division
-"""
-
-        msg = MIMEMultipart()
-        msg["From"]    = GMAIL_ADDRESS
-        msg["To"]      = driver_email
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
-
-        # Attach snapshot if available
-        if image_b64:
-            img_bytes = base64.b64decode(image_b64)
-            img_part  = MIMEImage(img_bytes, name=f"evidence_{fine_ref}.jpg")
-            msg.attach(img_part)
-
-        with smtplib.SMTP("smtp.gmail.com", 587) as srv:
-            srv.starttls()
-            srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
-
-        print(f"[EMAIL] Sent to {driver_email} for {fine_ref}")
-
-    except Exception as e:
-        print(f"[EMAIL] Failed: {e}")
-
-
-# ─────────────────────────────────────────────────────────────────
-# API ENDPOINT  –  Pi posts here on every fine (session_violations >= 3)
-# ─────────────────────────────────────────────────────────────────
-@app.route("/api/violation", methods=["POST"])
-def receive_violation():
-    data = request.get_json(force=True)
-    if not data:
-        return jsonify({"error": "no data"}), 400
-
-    plate = data.get("vehicle_plate", "UNKNOWN").upper().replace(" ", "")
-
-    with store_lock:
-        if plate not in violations:
-            violations[plate] = []
-        violations[plate].append(data)
-
-    print(f"[SERVER] Violation received: {data.get('fine_ref')} – {plate}")
-
-    # Send driver email in background
-    threading.Thread(target=send_driver_email, args=(data,), daemon=True).start()
-
-    return jsonify({"status": "ok"}), 200
-
-
-# ─────────────────────────────────────────────────────────────────
-# DASHBOARD  –  auto-refreshes every 5 seconds (stays on selected tab)
-# ─────────────────────────────────────────────────────────────────
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -176,213 +7,233 @@ DASHBOARD_HTML = """
   <meta http-equiv="refresh" content="5">
   <title>NTSA Live Violation Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #0a0e1a 0%, #0f1622 100%);
+      color: #ffffff;
       min-height: 100vh;
     }
 
-    /* ── Header ── */
+    /* Professional Header with Road Theme */
     header {
-      background: linear-gradient(135deg, #1a3a5c 0%, #0d2137 100%);
-      border-bottom: 2px solid #1f6feb;
-      padding: 18px 32px;
+      background: linear-gradient(135deg, #0a1a2f 0%, #0b2b3b 100%);
+      border-bottom: 3px solid #ff6b35;
+      padding: 20px 40px;
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
-    header img {
-      height: 48px;
-      filter: brightness(0) invert(1);
+    .logo {
+      background: linear-gradient(135deg, #ff6b35 0%, #ff8c42 100%);
+      width: 55px;
+      height: 55px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      box-shadow: 0 2px 10px rgba(255,107,53,0.4);
     }
-    header .titles h1 {
-      font-size: 22px;
+    .titles h1 {
+      font-size: 20px;
       font-weight: 700;
       letter-spacing: 1px;
-      color: #58a6ff;
+      background: linear-gradient(135deg, #ff6b35, #ffb347);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-family: 'Orbitron', monospace;
     }
-    header .titles p {
-      font-size: 12px;
-      color: #8b949e;
-      margin-top: 2px;
+    .titles p {
+      font-size: 11px;
+      color: #a0b3c9;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
     }
     .live-badge {
       margin-left: auto;
-      background: #238636;
+      background: linear-gradient(135deg, #00d4ff, #0088ff);
       color: #fff;
       font-size: 11px;
-      font-weight: 600;
-      padding: 4px 10px;
+      font-weight: 700;
+      padding: 6px 14px;
       border-radius: 20px;
       animation: pulse 2s infinite;
+      box-shadow: 0 0 15px rgba(0,180,255,0.5);
     }
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.6; }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.02); }
     }
 
-    /* ── Layout ── */
-    main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
-
-    /* ── Stat cards ── */
+    /* Stats Cards - Colorful */
     .stats {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 30px;
+      padding: 0;
     }
     .stat-card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
-      padding: 20px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 24px 20px;
       text-align: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+      backdrop-filter: blur(10px);
+    }
+    .stat-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
     .stat-card .value {
-      font-size: 36px;
-      font-weight: 700;
-      color: #58a6ff;
+      font-size: 42px;
+      font-weight: 800;
+      font-family: 'Orbitron', monospace;
     }
     .stat-card .label {
       font-size: 12px;
-      color: #8b949e;
-      margin-top: 6px;
+      font-weight: 600;
+      margin-top: 8px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 1px;
+      color: #a0b3c9;
     }
-    .stat-card.danger .value { color: #f85149; }
-    .stat-card.warn   .value { color: #e3b341; }
-    .stat-card.ok     .value { color: #3fb950; }
+    .stat-card.danger .value { background: linear-gradient(135deg, #ff416c, #ff4b2b); -webkit-background-clip: text; background-clip: text; color: #ff4b2b; }
+    .stat-card.warn .value { background: linear-gradient(135deg, #f7b733, #fc4a1a); -webkit-background-clip: text; background-clip: text; color: #f7b733; }
+    .stat-card.info .value { background: linear-gradient(135deg, #00d4ff, #0088ff); -webkit-background-clip: text; background-clip: text; color: #00d4ff; }
+    .stat-card.success .value { background: linear-gradient(135deg, #00e676, #00b0ff); -webkit-background-clip: text; background-clip: text; color: #00e676; }
 
-    /* ── Grid: chart + map ── */
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-bottom: 28px;
-    }
-    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+    /* Layout */
+    main { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
 
+    /* Cards */
     .card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
-      padding: 20px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 24px;
+      backdrop-filter: blur(10px);
     }
     .card h2 {
-      font-size: 14px;
-      font-weight: 600;
-      color: #8b949e;
+      font-size: 16px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.6px;
-      margin-bottom: 16px;
-      border-bottom: 1px solid #30363d;
-      padding-bottom: 10px;
+      letter-spacing: 1.5px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid rgba(255,107,53,0.5);
+      color: #ff8c42;
     }
 
-    /* ── Map placeholder ── */
+    /* Map Placeholder */
     #map-placeholder {
-      background: #0d2137;
-      border-radius: 8px;
+      background: linear-gradient(135deg, #0a1a2f, #0d1f2d);
+      border-radius: 12px;
       height: 260px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      gap: 10px;
-      color: #8b949e;
-      font-size: 13px;
-      border: 1px dashed #30363d;
+      gap: 12px;
+      color: #ff8c42;
+      font-size: 14px;
+      border: 1px solid rgba(255,107,53,0.3);
     }
-    #map-placeholder svg { opacity: 0.4; }
+    #map-placeholder svg { filter: drop-shadow(0 0 10px rgba(255,107,53,0.5)); }
 
-    /* ── Vehicle tabs ── */
+    /* Tabs */
     .tabs {
       display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
+      gap: 12px;
+      margin-bottom: 24px;
       flex-wrap: wrap;
     }
     .tab {
-      padding: 7px 18px;
-      border-radius: 6px;
-      border: 1px solid #30363d;
-      background: #0d1117;
-      color: #8b949e;
+      padding: 8px 24px;
+      border-radius: 30px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(10,14,26,0.8);
+      color: #a0b3c9;
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      transition: all 0.2s;
+      transition: all 0.3s;
     }
     .tab.active, .tab:hover {
-      background: #1f6feb;
-      border-color: #1f6feb;
+      background: linear-gradient(135deg, #ff6b35, #ff8c42);
+      border-color: #ff6b35;
       color: #fff;
+      box-shadow: 0 4px 15px rgba(255,107,53,0.3);
     }
 
-    /* ── Violation table ── */
-    .table-wrap { overflow-x: auto; }
+    /* Table Styles */
+    .table-wrap { overflow-x: auto; border-radius: 12px; }
     table {
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
     }
     thead th {
-      background: #1c2128;
-      color: #8b949e;
-      text-transform: uppercase;
-      font-size: 11px;
+      background: rgba(255,107,53,0.15);
+      color: #ff8c42;
+      font-weight: 700;
+      font-size: 12px;
       letter-spacing: 0.5px;
-      padding: 10px 14px;
+      padding: 14px 12px;
       text-align: left;
-      border-bottom: 1px solid #30363d;
+      border-bottom: 2px solid rgba(255,107,53,0.5);
     }
     tbody tr {
-      border-bottom: 1px solid #21262d;
-      transition: background 0.15s;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      transition: background 0.2s;
     }
-    tbody tr:hover { background: #1c2128; }
-    tbody td { padding: 10px 14px; color: #c9d1d9; vertical-align: middle; }
+    tbody tr:hover { background: rgba(255,107,53,0.1); }
+    tbody td { padding: 12px; color: #e0e6f0; }
 
     .badge {
       display: inline-block;
-      padding: 3px 10px;
-      border-radius: 12px;
+      padding: 4px 12px;
+      border-radius: 20px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
     }
-    .badge-fine    { background: #3d1a1a; color: #f85149; border: 1px solid #f85149; }
-    .badge-warning { background: #2d2008; color: #e3b341; border: 1px solid #e3b341; }
+    .badge-fine { background: linear-gradient(135deg, #ff416c, #ff4b2b); color: #fff; }
+    .badge-warning { background: linear-gradient(135deg, #f7b733, #fc4a1a); color: #fff; }
 
     .thumb {
-      width: 72px;
-      height: 48px;
+      width: 70px;
+      height: 50px;
       object-fit: cover;
-      border-radius: 4px;
-      border: 1px solid #30363d;
+      border-radius: 8px;
+      border: 2px solid #ff6b35;
       cursor: pointer;
+      transition: transform 0.2s;
     }
+    .thumb:hover { transform: scale(2); border-radius: 4px; }
     .no-img {
-      width: 72px;
-      height: 48px;
-      background: #21262d;
-      border-radius: 4px;
+      width: 70px;
+      height: 50px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 10px;
-      color: #484f58;
+      color: #5a6e8a;
     }
 
-    /* ── Image modal ── */
+    /* Modal */
     #modal {
       display: none;
       position: fixed; inset: 0;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0,0,0,0.95);
       z-index: 1000;
       align-items: center;
       justify-content: center;
@@ -391,136 +242,116 @@ DASHBOARD_HTML = """
     #modal img {
       max-width: 90vw;
       max-height: 85vh;
-      border-radius: 8px;
-      border: 2px solid #30363d;
+      border-radius: 12px;
+      border: 3px solid #ff6b35;
+      box-shadow: 0 0 50px rgba(255,107,53,0.3);
     }
     #modal-close {
-      position: fixed; top: 20px; right: 28px;
-      font-size: 32px; color: #fff; cursor: pointer;
+      position: fixed; top: 30px; right: 40px;
+      font-size: 40px; color: #ff6b35; cursor: pointer;
+      font-weight: bold;
     }
 
     footer {
       text-align: center;
-      padding: 20px;
-      color: #484f58;
+      padding: 25px;
+      color: #5a6e8a;
       font-size: 12px;
-      border-top: 1px solid #21262d;
-      margin-top: 20px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      margin-top: 30px;
+    }
+
+    @media (max-width: 900px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      main { padding: 20px; }
     }
   </style>
 </head>
 <body>
 
 <header>
-  <div class="titles">
-    <h1>&#9678; NTSA TRAFFIC VIOLATION MONITORING SYSTEM</h1>
-    <p>National Transport and Safety Authority &nbsp;|&nbsp; Real-Time Dashboard</p>
+  <div class="logo">
+    <span>🚦</span>
   </div>
-  <span class="live-badge">&#9679; LIVE</span>
+  <div class="titles">
+    <h1>NTSA TRAFFIC VIOLATION MONITORING SYSTEM</h1>
+    <p>National Transport and Safety Authority | Real-Time Enforcement Dashboard</p>
+  </div>
+  <span class="live-badge">
+    <span>🟢</span> LIVE MONITORING
+  </span>
 </header>
 
 <main>
 
-  <!-- Stat cards -->
   <div class="stats">
     <div class="stat-card danger">
       <div class="value">{{ total_fines }}</div>
-      <div class="label">Total Fines Issued</div>
+      <div class="label">🚨 FINES ISSUED</div>
     </div>
     <div class="stat-card warn">
       <div class="value">{{ total_warnings }}</div>
-      <div class="label">Warnings Issued</div>
+      <div class="label">⚠️ WARNINGS</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card info">
       <div class="value">{{ total_vehicles }}</div>
-      <div class="label">Vehicles Monitored</div>
+      <div class="label">🚗 VEHICLES MONITORED</div>
     </div>
-    <div class="stat-card ok">
+    <div class="stat-card success">
       <div class="value">{{ last_updated }}</div>
-      <div class="label">Last Updated</div>
+      <div class="label">🕐 LAST UPDATED</div>
     </div>
   </div>
 
-  <!-- Chart + Map -->
-  <div class="grid-2">
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin-bottom: 30px;">
     <div class="card">
-      <h2>Violations per Vehicle</h2>
+      <h2>📊 VIOLATIONS PER VEHICLE</h2>
       <canvas id="barChart" height="220"></canvas>
     </div>
     <div class="card">
-      <h2>Incident Location (GPS not yet integrated)</h2>
+      <h2>📍 LIVE INCIDENT MAP</h2>
       <div id="map-placeholder">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
-             stroke="#58a6ff" stroke-width="1.5">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75
-                   7-13c0-3.87-3.13-7-7-7z"/>
+        <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
           <circle cx="12" cy="9" r="2.5"/>
         </svg>
-        <span>GPS integration pending</span>
-        <span style="font-size:11px">Location data will appear here once GPS module is connected</span>
+        <span>🚧 GPS Integration Pending</span>
+        <span style="font-size: 11px; color: #5a6e8a;">Live location tracking coming soon</span>
       </div>
     </div>
   </div>
 
-  <!-- Violation table with vehicle tabs -->
   <div class="card">
-    <h2>Violation Log</h2>
+    <h2>📋 VIOLATION LOG</h2>
     <div class="tabs" id="tabs">
       {% for plate in plates %}
-      <div class="tab {% if loop.first %}active{% endif %}"
-           onclick="showTab('{{ plate }}', this)">{{ plate }}</div>
+      <div class="tab {% if loop.first %}active{% endif %}" onclick="showTab('{{ plate }}', this)">{{ plate }}</div>
       {% endfor %}
     </div>
     {% for plate, v_list in all_violations.items() %}
-    <div class="table-wrap tab-content" id="tab-{{ plate }}"
-         style="{% if not loop.first %}display:none{% endif %}">
+    <div class="table-wrap tab-content" id="tab-{{ plate }}" style="{% if not loop.first %}display:none{% endif %}">
       {% if v_list %}
       <table>
         <thead>
-          <tr>
-            <th>Fine Reference</th>
-            <th>Date</th>
-            <th>Time</th>
-            <th>Offence</th>
-            <th>Session #</th>
-            <th>Total</th>
-            <th>Type</th>
-            <th>Evidence</th>
-          </tr>
+          <tr><th>🔖 Fine Reference</th><th>📅 Date</th><th>⏰ Time</th><th>📝 Offence</th><th>🎯 Session</th><th>📈 Total</th><th>🏷️ Type</th><th>📸 Evidence</th><tr>
         </thead>
         <tbody>
           {% for v in v_list | reverse %}
           <tr>
-            <td style="font-family:monospace;font-size:12px">{{ v.fine_ref }}</td>
+            <td style="font-family: monospace;">{{ v.fine_ref }}</td>
             <td>{{ v.date }}</td>
             <td>{{ v.time }}</td>
-            <td style="max-width:220px;white-space:normal">{{ v.offence }}</td>
-            <td style="text-align:center">{{ v.session_violations }}</td>
-            <td style="text-align:center">{{ v.total_violations }}</td>
-            <td>
-              {% if v.session_violations >= 3 %}
-              <span class="badge badge-fine">FINE</span>
-              {% else %}
-              <span class="badge badge-warning">WARNING</span>
-              {% endif %}
-            </td>
-            <td>
-              {% if v.image_b64 %}
-              <img class="thumb"
-                   src="data:image/jpeg;base64,{{ v.image_b64 }}"
-                   onclick="openModal(this.src)" alt="evidence">
-              {% else %}
-              <div class="no-img">No img</div>
-              {% endif %}
-            </td>
+            <td>{{ v.offence }}</td>
+            <td style="text-align: center;"><strong>{{ v.session_violations }}</strong></td>
+            <td style="text-align: center;"><strong>{{ v.total_violations }}</strong></td>
+            <td>{% if v.session_violations >= 3 %}<span class="badge badge-fine">🔴 FINE</span>{% else %}<span class="badge badge-warning">🟠 WARNING</span>{% endif %}</td>
+            <td>{% if v.image_b64 %}<img class="thumb" src="data:image/jpeg;base64,{{ v.image_b64 }}" onclick="openModal(this.src)">{% else %}<div class="no-img">📷 No image</div>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       {% else %}
-      <p style="color:#484f58;padding:20px;text-align:center">
-        No violations recorded yet for {{ plate }}
-      </p>
+      <p style="color: #5a6e8a; padding: 40px; text-align: center;">🚗 No violations recorded for {{ plate }} yet</p>
       {% endif %}
     </div>
     {% endfor %}
@@ -528,20 +359,17 @@ DASHBOARD_HTML = """
 
 </main>
 
-<!-- Image modal -->
 <div id="modal" onclick="closeModal()">
   <span id="modal-close" onclick="closeModal()">&times;</span>
-  <img id="modal-img" src="" alt="Evidence">
+  <img id="modal-img" src="">
 </div>
 
 <footer>
-  NTSA Traffic Monitoring System &nbsp;|&nbsp;
-  Auto-refreshes every 5 seconds &nbsp;|&nbsp;
-  &copy; {{ year }} National Transport and Safety Authority
+  <p>NTSA Traffic Monitoring System | Powered by AI & IR Sensors | Data refreshes every 5 seconds</p>
+  <p>&copy; {{ year }} National Transport and Safety Authority — Keeping Kenyan Roads Safe</p>
 </footer>
 
 <script>
-  // ── Bar chart ──────────────────────────────────────────────────
   const ctx = document.getElementById('barChart').getContext('2d');
   new Chart(ctx, {
     type: 'bar',
@@ -549,50 +377,46 @@ DASHBOARD_HTML = """
       labels: {{ chart_labels | tojson }},
       datasets: [
         {
-          label: 'Fines',
+          label: '🔴 Fines',
           data: {{ chart_fines | tojson }},
-          backgroundColor: 'rgba(248, 81, 73, 0.7)',
-          borderColor: '#f85149',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: 'rgba(255, 65, 108, 0.8)',
+          borderColor: '#ff416c',
+          borderWidth: 2,
+          borderRadius: 8,
+          barPercentage: 0.6
         },
         {
-          label: 'Warnings',
+          label: '🟠 Warnings',
           data: {{ chart_warnings | tojson }},
-          backgroundColor: 'rgba(227, 179, 65, 0.7)',
-          borderColor: '#e3b341',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: 'rgba(247, 183, 51, 0.8)',
+          borderColor: '#f7b733',
+          borderWidth: 2,
+          borderRadius: 8,
+          barPercentage: 0.6
         }
       ]
     },
     options: {
       responsive: true,
+      maintainAspectRatio: true,
       plugins: {
-        legend: { labels: { color: '#8b949e', font: { size: 12 } } }
+        legend: { labels: { color: '#e0e6f0', font: { size: 12, weight: 'bold' } } }
       },
       scales: {
-        x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
-        y: {
-          ticks: { color: '#8b949e', stepSize: 1 },
-          grid: { color: '#21262d' },
-          beginAtZero: true,
-        }
+        x: { ticks: { color: '#a0b3c9', font: { weight: 'bold' } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#a0b3c9', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
       }
     }
   });
 
-  // ── Tab switching with memory ─────────────────────────────────
   function showTab(plate, el) {
     document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-' + plate).style.display = 'block';
     el.classList.add('active');
-    // Save selected tab to localStorage
     localStorage.setItem('selectedTab', plate);
   }
 
-  // ── Image modal ────────────────────────────────────────────────
   function openModal(src) {
     document.getElementById('modal-img').src = src;
     document.getElementById('modal').classList.add('open');
@@ -601,7 +425,6 @@ DASHBOARD_HTML = """
     document.getElementById('modal').classList.remove('open');
   }
 
-  // ── Restore previously selected tab after refresh ─────────────
   window.addEventListener('DOMContentLoaded', function() {
     const savedTab = localStorage.getItem('selectedTab');
     if (savedTab) {
@@ -618,48 +441,3 @@ DASHBOARD_HTML = """
 </body>
 </html>
 """
-
-
-@app.route("/")
-def dashboard():
-    with store_lock:
-        all_v = dict(violations)
-
-    # Build chart data
-    plates        = list(all_v.keys())
-    chart_fines   = []
-    chart_warnings = []
-    total_fines   = 0
-    total_warnings = 0
-
-    for plate in plates:
-        fines    = sum(1 for v in all_v[plate] if v["session_violations"] >= 3)
-        warnings = sum(1 for v in all_v[plate] if v["session_violations"] < 3)
-        chart_fines.append(fines)
-        chart_warnings.append(warnings)
-        total_fines    += fines
-        total_warnings += warnings
-
-    return render_template_string(
-        DASHBOARD_HTML,
-        all_violations  = all_v,
-        plates          = plates,
-        chart_labels    = plates,
-        chart_fines     = chart_fines,
-        chart_warnings  = chart_warnings,
-        total_fines     = total_fines,
-        total_warnings  = total_warnings,
-        total_vehicles  = len(plates),
-        last_updated    = datetime.datetime.now().strftime("%H:%M:%S"),
-        year            = datetime.date.today().year,
-    )
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"}), 200
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
