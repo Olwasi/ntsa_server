@@ -1,3 +1,162 @@
+"""
+NTSA Lane Violation Cloud Server
+==================================
+- Receives violation reports from the Pi via POST /api/violation
+- Serves a live NTSA dashboard at /
+- Sends email to the driver on every fine (violation >= 3)
+"""
+
+import os
+import base64
+import smtplib
+import datetime
+import threading
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+from flask import Flask, request, jsonify, render_template_string
+
+app = Flask(__name__)
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "douvonneli@gmail.com")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "eygd jwaa nmon jzyr")
+
+# ============================================================
+# IN-MEMORY VIOLATION STORE
+# ============================================================
+store_lock = threading.Lock()
+violations = {}
+
+def _seed_dummy():
+    dummy_plate = "KAA123B"
+    dummy_email = "dummy.driver@example.com"
+    base_date = datetime.date.today().strftime("%Y-%m-%d")
+    dummy_data = [
+        {
+            "fine_ref": f"NTSA-{base_date}-KAA123B-0001",
+            "vehicle_plate": dummy_plate,
+            "driver_email": dummy_email,
+            "date": base_date,
+            "time": "08:14:32",
+            "session_violations": 3,
+            "total_violations": 3,
+            "offence": "Illegal crossing of yellow continuous centre line",
+            "image_b64": "",
+        },
+        {
+            "fine_ref": f"NTSA-{base_date}-KAA123B-0002",
+            "vehicle_plate": dummy_plate,
+            "driver_email": dummy_email,
+            "date": base_date,
+            "time": "09:47:10",
+            "session_violations": 4,
+            "total_violations": 4,
+            "offence": "Illegal crossing of yellow continuous centre line",
+            "image_b64": "",
+        },
+        {
+            "fine_ref": f"WARN-{base_date}-KAA123B-0003",
+            "vehicle_plate": dummy_plate,
+            "driver_email": dummy_email,
+            "date": base_date,
+            "time": "11:02:55",
+            "session_violations": 1,
+            "total_violations": 5,
+            "offence": "Illegal crossing of yellow continuous centre line",
+            "image_b64": "",
+        },
+    ]
+    violations[dummy_plate] = dummy_data
+
+_seed_dummy()
+
+# ============================================================
+# EMAIL HELPER
+# ============================================================
+def send_driver_email(violation):
+    try:
+        fine_ref = violation["fine_ref"]
+        plate = violation["vehicle_plate"]
+        driver_email = violation["driver_email"]
+        date_s = violation["date"]
+        time_s = violation["time"]
+        total_v = violation["total_violations"]
+        image_b64 = violation.get("image_b64", "")
+
+        subject = f"NTSA Fine Notice – {fine_ref} – Vehicle {plate}"
+
+        body = f"""Dear Driver,
+
+This is an official notice from the National Transport and Safety Authority (NTSA).
+
+Your vehicle ({plate}) has been recorded committing a traffic violation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fine Reference : {fine_ref}
+Date           : {date_s}
+Time           : {time_s}
+Vehicle        : {plate}
+Total Violations on Record : {total_v}
+Offence        : Illegal crossing of yellow continuous centre line
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Photographic evidence of the violation is attached.
+
+NTSA Traffic Monitoring Division
+"""
+
+        msg = MIMEMultipart()
+        msg["From"] = GMAIL_ADDRESS
+        msg["To"] = driver_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        if image_b64:
+            img_bytes = base64.b64decode(image_b64)
+            img_part = MIMEImage(img_bytes, name=f"evidence_{fine_ref}.jpg")
+            msg.attach(img_part)
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as srv:
+            srv.starttls()
+            srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
+
+        print(f"[EMAIL] Sent to {driver_email} for {fine_ref}")
+
+    except Exception as e:
+        print(f"[EMAIL] Failed: {e}")
+
+# ============================================================
+# API ENDPOINT
+# ============================================================
+@app.route("/api/violation", methods=["POST"])
+def receive_violation():
+    data = request.get_json(force=True)
+    if not data:
+        return jsonify({"error": "no data"}), 400
+
+    plate = data.get("vehicle_plate", "UNKNOWN").upper().replace(" ", "")
+    session_v = data.get("session_violations", 0)
+
+    with store_lock:
+        if plate not in violations:
+            violations[plate] = []
+        violations[plate].append(data)
+
+    print(f"[SERVER] Violation received: {data.get('fine_ref')} – {plate} (session={session_v})")
+
+    if session_v >= 3:
+        print(f"[SERVER] Sending email for fine")
+        threading.Thread(target=send_driver_email, args=(data,), daemon=True).start()
+
+    return jsonify({"status": "ok"}), 200
+
+# ============================================================
+# DASHBOARD
+# ============================================================
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -10,15 +169,12 @@ DASHBOARD_HTML = """
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
       background: linear-gradient(135deg, #0a0e1a 0%, #0f1622 100%);
       color: #ffffff;
       min-height: 100vh;
     }
-
-    /* Professional Header with Road Theme */
     header {
       background: linear-gradient(135deg, #0a1a2f 0%, #0b2b3b 100%);
       border-bottom: 3px solid #ff6b35;
@@ -70,8 +226,6 @@ DASHBOARD_HTML = """
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.8; transform: scale(1.02); }
     }
-
-    /* Stats Cards - Colorful */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -109,11 +263,7 @@ DASHBOARD_HTML = """
     .stat-card.warn .value { background: linear-gradient(135deg, #f7b733, #fc4a1a); -webkit-background-clip: text; background-clip: text; color: #f7b733; }
     .stat-card.info .value { background: linear-gradient(135deg, #00d4ff, #0088ff); -webkit-background-clip: text; background-clip: text; color: #00d4ff; }
     .stat-card.success .value { background: linear-gradient(135deg, #00e676, #00b0ff); -webkit-background-clip: text; background-clip: text; color: #00e676; }
-
-    /* Layout */
     main { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
-
-    /* Cards */
     .card {
       background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
       border: 1px solid rgba(255,255,255,0.1);
@@ -131,8 +281,6 @@ DASHBOARD_HTML = """
       border-bottom: 2px solid rgba(255,107,53,0.5);
       color: #ff8c42;
     }
-
-    /* Map Placeholder */
     #map-placeholder {
       background: linear-gradient(135deg, #0a1a2f, #0d1f2d);
       border-radius: 12px;
@@ -147,8 +295,6 @@ DASHBOARD_HTML = """
       border: 1px solid rgba(255,107,53,0.3);
     }
     #map-placeholder svg { filter: drop-shadow(0 0 10px rgba(255,107,53,0.5)); }
-
-    /* Tabs */
     .tabs {
       display: flex;
       gap: 12px;
@@ -172,8 +318,6 @@ DASHBOARD_HTML = """
       color: #fff;
       box-shadow: 0 4px 15px rgba(255,107,53,0.3);
     }
-
-    /* Table Styles */
     .table-wrap { overflow-x: auto; border-radius: 12px; }
     table {
       width: 100%;
@@ -196,7 +340,6 @@ DASHBOARD_HTML = """
     }
     tbody tr:hover { background: rgba(255,107,53,0.1); }
     tbody td { padding: 12px; color: #e0e6f0; }
-
     .badge {
       display: inline-block;
       padding: 4px 12px;
@@ -206,7 +349,6 @@ DASHBOARD_HTML = """
     }
     .badge-fine { background: linear-gradient(135deg, #ff416c, #ff4b2b); color: #fff; }
     .badge-warning { background: linear-gradient(135deg, #f7b733, #fc4a1a); color: #fff; }
-
     .thumb {
       width: 70px;
       height: 50px;
@@ -228,8 +370,6 @@ DASHBOARD_HTML = """
       font-size: 10px;
       color: #5a6e8a;
     }
-
-    /* Modal */
     #modal {
       display: none;
       position: fixed; inset: 0;
@@ -251,7 +391,6 @@ DASHBOARD_HTML = """
       font-size: 40px; color: #ff6b35; cursor: pointer;
       font-weight: bold;
     }
-
     footer {
       text-align: center;
       padding: 25px;
@@ -260,7 +399,6 @@ DASHBOARD_HTML = """
       border-top: 1px solid rgba(255,255,255,0.05);
       margin-top: 30px;
     }
-
     @media (max-width: 900px) {
       .stats { grid-template-columns: repeat(2, 1fr); }
       main { padding: 20px; }
@@ -268,41 +406,21 @@ DASHBOARD_HTML = """
   </style>
 </head>
 <body>
-
 <header>
-  <div class="logo">
-    <span>🚦</span>
-  </div>
+  <div class="logo"><span>🚦</span></div>
   <div class="titles">
     <h1>NTSA TRAFFIC VIOLATION MONITORING SYSTEM</h1>
     <p>National Transport and Safety Authority | Real-Time Enforcement Dashboard</p>
   </div>
-  <span class="live-badge">
-    <span>🟢</span> LIVE MONITORING
-  </span>
+  <span class="live-badge"><span>🟢</span> LIVE MONITORING</span>
 </header>
-
 <main>
-
   <div class="stats">
-    <div class="stat-card danger">
-      <div class="value">{{ total_fines }}</div>
-      <div class="label">🚨 FINES ISSUED</div>
-    </div>
-    <div class="stat-card warn">
-      <div class="value">{{ total_warnings }}</div>
-      <div class="label">⚠️ WARNINGS</div>
-    </div>
-    <div class="stat-card info">
-      <div class="value">{{ total_vehicles }}</div>
-      <div class="label">🚗 VEHICLES MONITORED</div>
-    </div>
-    <div class="stat-card success">
-      <div class="value">{{ last_updated }}</div>
-      <div class="label">🕐 LAST UPDATED</div>
-    </div>
+    <div class="stat-card danger"><div class="value">{{ total_fines }}</div><div class="label">🚨 FINES ISSUED</div></div>
+    <div class="stat-card warn"><div class="value">{{ total_warnings }}</div><div class="label">⚠️ WARNINGS</div></div>
+    <div class="stat-card info"><div class="value">{{ total_vehicles }}</div><div class="label">🚗 VEHICLES MONITORED</div></div>
+    <div class="stat-card success"><div class="value">{{ last_updated }}</div><div class="label">🕐 LAST UPDATED</div></div>
   </div>
-
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin-bottom: 30px;">
     <div class="card">
       <h2>📊 VIOLATIONS PER VEHICLE</h2>
@@ -320,7 +438,6 @@ DASHBOARD_HTML = """
       </div>
     </div>
   </div>
-
   <div class="card">
     <h2>📋 VIOLATION LOG</h2>
     <div class="tabs" id="tabs">
@@ -333,7 +450,7 @@ DASHBOARD_HTML = """
       {% if v_list %}
       <table>
         <thead>
-          <tr><th>🔖 Fine Reference</th><th>📅 Date</th><th>⏰ Time</th><th>📝 Offence</th><th>🎯 Session</th><th>📈 Total</th><th>🏷️ Type</th><th>📸 Evidence</th><tr>
+          <tr><th>🔖 Fine Reference</th><th>📅 Date</th><th>⏰ Time</th><th>📝 Offence</th><th>🎯 Session</th><th>📈 Total</th><th>🏷️ Type</th><th>📸 Evidence</th></tr>
         </thead>
         <tbody>
           {% for v in v_list | reverse %}
@@ -356,19 +473,15 @@ DASHBOARD_HTML = """
     </div>
     {% endfor %}
   </div>
-
 </main>
-
 <div id="modal" onclick="closeModal()">
   <span id="modal-close" onclick="closeModal()">&times;</span>
   <img id="modal-img" src="">
 </div>
-
 <footer>
   <p>NTSA Traffic Monitoring System | Powered by AI & IR Sensors | Data refreshes every 5 seconds</p>
   <p>&copy; {{ year }} National Transport and Safety Authority — Keeping Kenyan Roads Safe</p>
 </footer>
-
 <script>
   const ctx = document.getElementById('barChart').getContext('2d');
   new Chart(ctx, {
@@ -376,39 +489,20 @@ DASHBOARD_HTML = """
     data: {
       labels: {{ chart_labels | tojson }},
       datasets: [
-        {
-          label: '🔴 Fines',
-          data: {{ chart_fines | tojson }},
-          backgroundColor: 'rgba(255, 65, 108, 0.8)',
-          borderColor: '#ff416c',
-          borderWidth: 2,
-          borderRadius: 8,
-          barPercentage: 0.6
-        },
-        {
-          label: '🟠 Warnings',
-          data: {{ chart_warnings | tojson }},
-          backgroundColor: 'rgba(247, 183, 51, 0.8)',
-          borderColor: '#f7b733',
-          borderWidth: 2,
-          borderRadius: 8,
-          barPercentage: 0.6
-        }
+        { label: '🔴 Fines', data: {{ chart_fines | tojson }}, backgroundColor: 'rgba(255, 65, 108, 0.8)', borderColor: '#ff416c', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 },
+        { label: '🟠 Warnings', data: {{ chart_warnings | tojson }}, backgroundColor: 'rgba(247, 183, 51, 0.8)', borderColor: '#f7b733', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: true,
-      plugins: {
-        legend: { labels: { color: '#e0e6f0', font: { size: 12, weight: 'bold' } } }
-      },
+      plugins: { legend: { labels: { color: '#e0e6f0', font: { size: 12, weight: 'bold' } } } },
       scales: {
         x: { ticks: { color: '#a0b3c9', font: { weight: 'bold' } }, grid: { color: 'rgba(255,255,255,0.05)' } },
         y: { ticks: { color: '#a0b3c9', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
       }
     }
   });
-
   function showTab(plate, el) {
     document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -416,7 +510,6 @@ DASHBOARD_HTML = """
     el.classList.add('active');
     localStorage.setItem('selectedTab', plate);
   }
-
   function openModal(src) {
     document.getElementById('modal-img').src = src;
     document.getElementById('modal').classList.add('open');
@@ -424,7 +517,6 @@ DASHBOARD_HTML = """
   function closeModal() {
     document.getElementById('modal').classList.remove('open');
   }
-
   window.addEventListener('DOMContentLoaded', function() {
     const savedTab = localStorage.getItem('selectedTab');
     if (savedTab) {
@@ -441,3 +533,44 @@ DASHBOARD_HTML = """
 </body>
 </html>
 """
+
+@app.route("/")
+def dashboard():
+    with store_lock:
+        all_v = dict(violations)
+
+    plates = list(all_v.keys())
+    chart_fines = []
+    chart_warnings = []
+    total_fines = 0
+    total_warnings = 0
+
+    for plate in plates:
+        fines = sum(1 for v in all_v[plate] if v["session_violations"] >= 3)
+        warnings = sum(1 for v in all_v[plate] if v["session_violations"] < 3)
+        chart_fines.append(fines)
+        chart_warnings.append(warnings)
+        total_fines += fines
+        total_warnings += warnings
+
+    return render_template_string(
+        DASHBOARD_HTML,
+        all_violations=all_v,
+        plates=plates,
+        chart_labels=plates,
+        chart_fines=chart_fines,
+        chart_warnings=chart_warnings,
+        total_fines=total_fines,
+        total_warnings=total_warnings,
+        total_vehicles=len(plates),
+        last_updated=datetime.datetime.now().strftime("%H:%M:%S"),
+        year=datetime.date.today().year,
+    )
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
