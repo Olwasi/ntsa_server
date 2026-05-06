@@ -119,8 +119,7 @@ NTSA Traffic Monitoring Division
             img_part = MIMEImage(img_bytes, name=f"evidence_{fine_ref}.jpg")
             msg.attach(img_part)
 
-        with smtplib.SMTP("smtp.gmail.com", 587) as srv:
-            srv.starttls()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
             srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
             srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
 
@@ -155,7 +154,7 @@ def receive_violation():
     return jsonify({"status": "ok"}), 200
 
 # ============================================================
-# DASHBOARD
+# DASHBOARD WITH ROAD BACKGROUND
 # ============================================================
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -171,7 +170,10 @@ DASHBOARD_HTML = """
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(135deg, #0a0e1a 0%, #0f1622 100%);
+      background: linear-gradient(rgba(10, 14, 26, 0.85), rgba(15, 22, 34, 0.92)), url('https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=2069&auto=format&fit=crop');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
       color: #ffffff;
       min-height: 100vh;
     }
@@ -265,11 +267,11 @@ DASHBOARD_HTML = """
     .stat-card.success .value { background: linear-gradient(135deg, #00e676, #00b0ff); -webkit-background-clip: text; background-clip: text; color: #00e676; }
     main { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
     .card {
-      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+      background: rgba(22, 27, 34, 0.85);
+      backdrop-filter: blur(10px);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 20px;
       padding: 24px;
-      backdrop-filter: blur(10px);
     }
     .card h2 {
       font-size: 16px;
