@@ -154,7 +154,7 @@ def receive_violation():
     return jsonify({"status": "ok"}), 200
 
 # ============================================================
-# DASHBOARD - CLEAN PROFESSIONAL DARK THEME
+# DASHBOARD - WITH STATIC MAP AND NTSA LOGO
 # ============================================================
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -288,15 +288,45 @@ DASHBOARD_HTML = """
     #map-placeholder {
       background: #0d1b2a;
       border-radius: 12px;
-      height: 260px;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 20px;
+    }
+    .kenya-map {
+      width: 100%;
+      max-width: 200px;
+      height: auto;
+    }
+    .region-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .region {
+      background: #1e2a3a;
+      padding: 8px;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 11px;
+      color: #ff8c42;
+      font-weight: 600;
+    }
+    .ntsa-logo {
+      width: 60px;
+      height: 60px;
+      background: linear-gradient(135deg, #ff6b35, #ff8c42);
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-direction: column;
-      gap: 12px;
-      color: #ff8c42;
-      font-size: 14px;
-      border: 1px solid #2a3a4a;
+      font-size: 30px;
+      margin-bottom: 10px;
     }
     .tabs {
       display: flex;
@@ -430,14 +460,25 @@ DASHBOARD_HTML = """
       <canvas id="barChart" height="220"></canvas>
     </div>
     <div class="card">
-      <h2>📍 LIVE INCIDENT MAP</h2>
+      <h2>🗺️ NTSA KENYA REGIONS</h2>
       <div id="map-placeholder">
-        <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-          <circle cx="12" cy="9" r="2.5"/>
+        <div class="ntsa-logo">
+          <span>🚦</span>
+        </div>
+        <svg class="kenya-map" viewBox="0 0 100 120" fill="none" stroke="#ff8c42" stroke-width="1.5">
+          <path d="M50 10 L55 25 L70 30 L65 45 L75 55 L70 70 L80 85 L70 95 L50 100 L30 95 L20 85 L30 70 L25 55 L35 45 L30 30 L45 25 Z" fill="#1e2a3a" stroke="#ff8c42"/>
+          <circle cx="50" cy="60" r="4" fill="#ff4757"/>
+          <text x="48" y="55" font-size="6" fill="#fff">NBI</text>
         </svg>
-        <span>🚧 GPS Integration Pending</span>
-        <span style="font-size: 11px;">Live location tracking coming soon</span>
+        <div class="region-grid">
+          <div class="region">📍 NAIROBI</div>
+          <div class="region">📍 MOMBASA</div>
+          <div class="region">📍 KISUMU</div>
+          <div class="region">📍 NAKURU</div>
+          <div class="region">📍 ELDORET</div>
+          <div class="region">📍 THIKA</div>
+        </div>
+        <div style="font-size: 10px; color: #5a6e8a; margin-top: 10px;">National Transport & Safety Authority</div>
       </div>
     </div>
   </div>
