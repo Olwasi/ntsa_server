@@ -154,7 +154,7 @@ def receive_violation():
     return jsonify({"status": "ok"}), 200
 
 # ============================================================
-# DASHBOARD WITH ROAD BACKGROUND
+# DASHBOARD - CLEAN PROFESSIONAL DARK THEME
 # ============================================================
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -170,15 +170,12 @@ DASHBOARD_HTML = """
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(rgba(10, 14, 26, 0.85), rgba(15, 22, 34, 0.92)), url('https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=2069&auto=format&fit=crop');
-      background-size: cover;
-      background-position: center;
-      background-attachment: fixed;
+      background: #0f0f1a;
       color: #ffffff;
       min-height: 100vh;
     }
     header {
-      background: linear-gradient(135deg, #0a1a2f 0%, #0b2b3b 100%);
+      background: linear-gradient(135deg, #0d1b2a 0%, #1b263b 100%);
       border-bottom: 3px solid #ff6b35;
       padding: 20px 40px;
       display: flex;
@@ -236,17 +233,16 @@ DASHBOARD_HTML = """
       padding: 0;
     }
     .stat-card {
-      background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: linear-gradient(135deg, #1e2a3a 0%, #16212e 100%);
+      border: 1px solid #2a3a4a;
       border-radius: 16px;
       padding: 24px 20px;
       text-align: center;
       transition: transform 0.2s, box-shadow 0.2s;
-      backdrop-filter: blur(10px);
     }
     .stat-card:hover {
       transform: translateY(-5px);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
     }
     .stat-card .value {
       font-size: 42px;
@@ -261,17 +257,17 @@ DASHBOARD_HTML = """
       letter-spacing: 1px;
       color: #a0b3c9;
     }
-    .stat-card.danger .value { background: linear-gradient(135deg, #ff416c, #ff4b2b); -webkit-background-clip: text; background-clip: text; color: #ff4b2b; }
-    .stat-card.warn .value { background: linear-gradient(135deg, #f7b733, #fc4a1a); -webkit-background-clip: text; background-clip: text; color: #f7b733; }
-    .stat-card.info .value { background: linear-gradient(135deg, #00d4ff, #0088ff); -webkit-background-clip: text; background-clip: text; color: #00d4ff; }
-    .stat-card.success .value { background: linear-gradient(135deg, #00e676, #00b0ff); -webkit-background-clip: text; background-clip: text; color: #00e676; }
+    .stat-card.danger .value { color: #ff4757; }
+    .stat-card.warn .value { color: #ffa502; }
+    .stat-card.info .value { color: #1e90ff; }
+    .stat-card.success .value { color: #2ed573; }
     main { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
     .card {
-      background: rgba(22, 27, 34, 0.85);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: #16212e;
+      border: 1px solid #2a3a4a;
       border-radius: 20px;
       padding: 24px;
+      margin-bottom: 30px;
     }
     .card h2 {
       font-size: 16px;
@@ -280,11 +276,17 @@ DASHBOARD_HTML = """
       letter-spacing: 1.5px;
       margin-bottom: 20px;
       padding-bottom: 12px;
-      border-bottom: 2px solid rgba(255,107,53,0.5);
+      border-bottom: 2px solid #ff6b35;
       color: #ff8c42;
     }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 25px;
+      margin-bottom: 30px;
+    }
     #map-placeholder {
-      background: linear-gradient(135deg, #0a1a2f, #0d1f2d);
+      background: #0d1b2a;
       border-radius: 12px;
       height: 260px;
       display: flex;
@@ -294,9 +296,8 @@ DASHBOARD_HTML = """
       gap: 12px;
       color: #ff8c42;
       font-size: 14px;
-      border: 1px solid rgba(255,107,53,0.3);
+      border: 1px solid #2a3a4a;
     }
-    #map-placeholder svg { filter: drop-shadow(0 0 10px rgba(255,107,53,0.5)); }
     .tabs {
       display: flex;
       gap: 12px;
@@ -306,8 +307,8 @@ DASHBOARD_HTML = """
     .tab {
       padding: 8px 24px;
       border-radius: 30px;
-      border: 1px solid rgba(255,255,255,0.2);
-      background: rgba(10,14,26,0.8);
+      border: 1px solid #2a3a4a;
+      background: #0d1b2a;
       color: #a0b3c9;
       cursor: pointer;
       font-size: 13px;
@@ -318,7 +319,6 @@ DASHBOARD_HTML = """
       background: linear-gradient(135deg, #ff6b35, #ff8c42);
       border-color: #ff6b35;
       color: #fff;
-      box-shadow: 0 4px 15px rgba(255,107,53,0.3);
     }
     .table-wrap { overflow-x: auto; border-radius: 12px; }
     table {
@@ -327,20 +327,20 @@ DASHBOARD_HTML = """
       font-size: 13px;
     }
     thead th {
-      background: rgba(255,107,53,0.15);
+      background: #1b2a3a;
       color: #ff8c42;
       font-weight: 700;
       font-size: 12px;
       letter-spacing: 0.5px;
       padding: 14px 12px;
       text-align: left;
-      border-bottom: 2px solid rgba(255,107,53,0.5);
+      border-bottom: 2px solid #ff6b35;
     }
     tbody tr {
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      border-bottom: 1px solid #2a3a4a;
       transition: background 0.2s;
     }
-    tbody tr:hover { background: rgba(255,107,53,0.1); }
+    tbody tr:hover { background: #1b2a3a; }
     tbody td { padding: 12px; color: #e0e6f0; }
     .badge {
       display: inline-block;
@@ -349,8 +349,8 @@ DASHBOARD_HTML = """
       font-size: 11px;
       font-weight: 700;
     }
-    .badge-fine { background: linear-gradient(135deg, #ff416c, #ff4b2b); color: #fff; }
-    .badge-warning { background: linear-gradient(135deg, #f7b733, #fc4a1a); color: #fff; }
+    .badge-fine { background: #dc2626; color: #fff; }
+    .badge-warning { background: #f59e0b; color: #fff; }
     .thumb {
       width: 70px;
       height: 50px;
@@ -364,7 +364,7 @@ DASHBOARD_HTML = """
     .no-img {
       width: 70px;
       height: 50px;
-      background: rgba(255,255,255,0.05);
+      background: #2a3a4a;
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -386,7 +386,6 @@ DASHBOARD_HTML = """
       max-height: 85vh;
       border-radius: 12px;
       border: 3px solid #ff6b35;
-      box-shadow: 0 0 50px rgba(255,107,53,0.3);
     }
     #modal-close {
       position: fixed; top: 30px; right: 40px;
@@ -398,11 +397,12 @@ DASHBOARD_HTML = """
       padding: 25px;
       color: #5a6e8a;
       font-size: 12px;
-      border-top: 1px solid rgba(255,255,255,0.05);
+      border-top: 1px solid #2a3a4a;
       margin-top: 30px;
     }
     @media (max-width: 900px) {
       .stats { grid-template-columns: repeat(2, 1fr); }
+      .grid-2 { grid-template-columns: 1fr; }
       main { padding: 20px; }
     }
   </style>
@@ -423,7 +423,8 @@ DASHBOARD_HTML = """
     <div class="stat-card info"><div class="value">{{ total_vehicles }}</div><div class="label">🚗 VEHICLES MONITORED</div></div>
     <div class="stat-card success"><div class="value">{{ last_updated }}</div><div class="label">🕐 LAST UPDATED</div></div>
   </div>
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin-bottom: 30px;">
+
+  <div class="grid-2">
     <div class="card">
       <h2>📊 VIOLATIONS PER VEHICLE</h2>
       <canvas id="barChart" height="220"></canvas>
@@ -436,10 +437,11 @@ DASHBOARD_HTML = """
           <circle cx="12" cy="9" r="2.5"/>
         </svg>
         <span>🚧 GPS Integration Pending</span>
-        <span style="font-size: 11px; color: #5a6e8a;">Live location tracking coming soon</span>
+        <span style="font-size: 11px;">Live location tracking coming soon</span>
       </div>
     </div>
   </div>
+
   <div class="card">
     <h2>📋 VIOLATION LOG</h2>
     <div class="tabs" id="tabs">
@@ -491,8 +493,8 @@ DASHBOARD_HTML = """
     data: {
       labels: {{ chart_labels | tojson }},
       datasets: [
-        { label: '🔴 Fines', data: {{ chart_fines | tojson }}, backgroundColor: 'rgba(255, 65, 108, 0.8)', borderColor: '#ff416c', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 },
-        { label: '🟠 Warnings', data: {{ chart_warnings | tojson }}, backgroundColor: 'rgba(247, 183, 51, 0.8)', borderColor: '#f7b733', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 }
+        { label: '🔴 Fines', data: {{ chart_fines | tojson }}, backgroundColor: 'rgba(220, 38, 38, 0.8)', borderColor: '#dc2626', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 },
+        { label: '🟠 Warnings', data: {{ chart_warnings | tojson }}, backgroundColor: 'rgba(245, 158, 11, 0.8)', borderColor: '#f59e0b', borderWidth: 2, borderRadius: 8, barPercentage: 0.6 }
       ]
     },
     options: {
@@ -500,8 +502,8 @@ DASHBOARD_HTML = """
       maintainAspectRatio: true,
       plugins: { legend: { labels: { color: '#e0e6f0', font: { size: 12, weight: 'bold' } } } },
       scales: {
-        x: { ticks: { color: '#a0b3c9', font: { weight: 'bold' } }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: '#a0b3c9', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+        x: { ticks: { color: '#a0b3c9' }, grid: { color: '#2a3a4a' } },
+        y: { ticks: { color: '#a0b3c9', stepSize: 1 }, grid: { color: '#2a3a4a' }, beginAtZero: true }
       }
     }
   });
