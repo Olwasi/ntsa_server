@@ -1,0 +1,452 @@
+/*
+  ESP32 Robot — IMU Gyro Drift Correction + BLE Control
+  -------------------------------------------------------
+  Hardware:
+    Motor Driver : HW-094 (L298N compatible)
+    IMU          : MPU6050 (I2C on SDA=21, SCL=22)
+    BLE App      : Any joystick BLE UART app (e.g. "Serial Bluetooth Terminal" or "BLE Controller")
+
+  Pin Mapping:
+    LEFT  motor  → IN1=33, IN2=13, PWM(ENA)=14
+    RIGHT motor  → IN1=26, IN2=27, PWM(ENB)=25
+
+  BLE Command Map:
+    'F' = Forward        'B' = Backward
+    'R' = Spin Right     'L' = Spin Left
+    'S' = Stop           'A' = Auto/Gyro mode ON
+    'M' = Manual mode    'C' = Recalibrate gyro
+    'D' = Hardware diagnostic report
+    'V' = Toggle live IMU stream
+    '1' = Speed down (-10)    '2' = Speed up (+10)
+    '3' = Minimum speed       '4' = Maximum speed
+
+  Speed Slider:
+    Sends "75.0" etc → mapped 0–100% to motor speed 80–255.
+
+  FIXES APPLIED:
+    1. kP is true gain — no hidden /100 divider
+    2. DEADBAND raised to 1.5 deg — suppresses gyro noise causing long-term drift
+    3. Heading decay (x0.98 per cycle) — prevents heading wind-up over time
+    4. Correction constrained to ±30 — less aggressive than before (was ±50)
+    5. Correction sign correct for this chassis wiring
+    6. Reverse also gets gyro correction
+    7. Auto mode resets heading + lastGyroTime and starts motors
+    8. Output speeds constrained after correction
+*/
+
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <Wire.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+
+// ── Pin Definitions ──────────────────────────────────────────────────────────
+#define LEFT_IN1   33
+#define LEFT_IN2   13
+#define LEFT_PWM   14
+
+#define RIGHT_IN1  26
+#define RIGHT_IN2  27
+#define RIGHT_PWM  25
+
+// ── PWM Settings ─────────────────────────────────────────────────────────────
+#define PWM_FREQ       1000
+#define PWM_RESOLUTION 8
+
+// ── Speed Settings ────────────────────────────────────────────────────────────
+int   baseSpeed        = 90;
+const int MIN_SPEED    =  80;
+const int MAX_SPEED    = 255;
+const int SPEED_STEP   =  10;
+const int TURN_SPEED   =  130;
+
+// ── Gyro Correction Tuning ────────────────────────────────────────────────────
+// kP: increase if still drifts, decrease if robot wobbles side to side
+const float kP       = 1.2f;
+
+// DEADBAND: ignore heading errors smaller than this (degrees)
+// Raised to 1.5 — gyro noise was causing slow drift even on straight runs
+const float DEADBAND = 1.5f;
+
+// ── IMU ───────────────────────────────────────────────────────────────────────
+Adafruit_MPU6050 mpu;
+bool  mpuOnline      = false;
+float gyroZ_offset   = 0.0;
+float headingAngle   = 0.0;
+unsigned long lastGyroTime = 0;
+
+// ── Robot State ───────────────────────────────────────────────────────────────
+bool  isAutoMode     = false;
+bool  isDriving      = false;
+bool  streamIMU      = false;
+char  lastDirection  = 'S';
+
+// ── BLE UUIDs ─────────────────────────────────────────────────────────────────
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+BLEServer*         pServer           = nullptr;
+BLECharacteristic* pTxCharacteristic = nullptr;
+bool deviceConnected = false;
+
+// ── Forward declarations ──────────────────────────────────────────────────────
+void drive(int left, int right);
+void stopMotors();
+void calibrateGyro();
+void reportHardwareStatus();
+void sendBLE(String msg);
+void updateHeading();
+
+// ── BLE Server Callbacks ──────────────────────────────────────────────────────
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* ps) {
+    deviceConnected = true;
+    sendBLE("BLE Connected. Robot ready.");
+    reportHardwareStatus();
+  }
+  void onDisconnect(BLEServer* ps) {
+    deviceConnected = false;
+    stopMotors();
+    isAutoMode = false;
+    BLEDevice::startAdvertising();
+  }
+};
+
+// ── BLE RX Callbacks ──────────────────────────────────────────────────────────
+class RxCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* pCharacteristic) {
+    String rxValue = pCharacteristic->getValue();
+    if (rxValue.length() == 0) return;
+
+    char cmd = (char)rxValue[0];
+
+    // Speed slider: sends "75.0" or "45.50" etc.
+    if (rxValue.length() > 1 && (isdigit(cmd) || cmd == '.')) {
+      float sliderValue = rxValue.toFloat();
+      sliderValue = constrain(sliderValue, 0.0f, 100.0f);
+      baseSpeed = (int)(MIN_SPEED + (sliderValue / 100.0f) * (MAX_SPEED - MIN_SPEED));
+      baseSpeed = constrain(baseSpeed, MIN_SPEED, MAX_SPEED);
+      sendBLE("Speed slider: " + String((int)sliderValue) + "% -> motor speed: " + String(baseSpeed));
+      return;
+    }
+
+    switch (cmd) {
+
+      case 'F':
+        isAutoMode    = false;
+        isDriving     = true;
+        lastDirection = 'F';
+        headingAngle  = 0.0;
+        lastGyroTime  = millis();
+        drive(baseSpeed, baseSpeed);
+        sendBLE("Forward");
+        break;
+
+      case 'B':
+        isAutoMode    = false;
+        isDriving     = true;
+        lastDirection = 'B';
+        headingAngle  = 0.0;
+        lastGyroTime  = millis();
+        drive(-baseSpeed, -baseSpeed);
+        sendBLE("Backward");
+        break;
+
+      case 'R':
+        isAutoMode    = false;
+        isDriving     = false;
+        lastDirection = 'R';
+        drive(TURN_SPEED, -TURN_SPEED);
+        sendBLE("Right");
+        break;
+
+      case 'L':
+        isAutoMode    = false;
+        isDriving     = false;
+        lastDirection = 'L';
+        drive(-TURN_SPEED, TURN_SPEED);
+        sendBLE("Left");
+        break;
+
+      case 'S':
+        isAutoMode    = false;
+        isDriving     = false;
+        lastDirection = 'S';
+        headingAngle  = 0.0;
+        stopMotors();
+        sendBLE("Stop");
+        break;
+
+      case 'A':
+        isAutoMode   = true;
+        isDriving    = false;
+        headingAngle = 0.0;
+        lastGyroTime = millis();
+        drive(baseSpeed, baseSpeed);
+        sendBLE("Auto/Straight mode ON — robot will self-correct drift");
+        break;
+
+      case 'M':
+        isAutoMode = false;
+        isDriving  = false;
+        stopMotors();
+        sendBLE("Manual mode");
+        break;
+
+      case 'C':
+        stopMotors();
+        sendBLE("Calibrating gyro — keep robot STILL for 2 seconds...");
+        calibrateGyro();
+        sendBLE("Gyro calibrated. Offset: " + String(gyroZ_offset, 4) + " rad/s");
+        break;
+
+      case 'V':
+        streamIMU = !streamIMU;
+        sendBLE(streamIMU ? "IMU stream ON — move robot to see values" : "IMU stream OFF");
+        break;
+
+      case 'D':
+        reportHardwareStatus();
+        break;
+
+      case '1':
+        baseSpeed = constrain(baseSpeed - SPEED_STEP, MIN_SPEED, MAX_SPEED);
+        sendBLE("Speed: " + String(baseSpeed));
+        break;
+      case '2':
+        baseSpeed = constrain(baseSpeed + SPEED_STEP, MIN_SPEED, MAX_SPEED);
+        sendBLE("Speed: " + String(baseSpeed));
+        break;
+      case '3':
+        baseSpeed = MIN_SPEED;
+        sendBLE("Min speed: " + String(baseSpeed));
+        break;
+      case '4':
+        baseSpeed = MAX_SPEED;
+        sendBLE("Max speed: " + String(baseSpeed));
+        break;
+
+      default:
+        break;
+    }
+  }
+};
+
+// ── sendBLE ───────────────────────────────────────────────────────────────────
+void sendBLE(String msg) {
+  Serial.println(msg);
+  if (deviceConnected && pTxCharacteristic) {
+    pTxCharacteristic->setValue(msg.c_str());
+    pTxCharacteristic->notify();
+    delay(10);
+  }
+}
+
+// ── drive ─────────────────────────────────────────────────────────────────────
+void drive(int left, int right) {
+  left  = constrain(left,  -255, 255);
+  right = constrain(right, -255, 255);
+
+  digitalWrite(LEFT_IN1, left  > 0 ? HIGH : LOW);
+  digitalWrite(LEFT_IN2, left  < 0 ? HIGH : LOW);
+
+  // Right motor physically mirrored — IN1/IN2 inverted
+  digitalWrite(RIGHT_IN1, right < 0 ? HIGH : LOW);
+  digitalWrite(RIGHT_IN2, right > 0 ? HIGH : LOW);
+
+  ledcWrite(LEFT_PWM,  abs(left));
+  ledcWrite(RIGHT_PWM, abs(right));
+}
+
+void stopMotors() {
+  drive(0, 0);
+}
+
+// ── calibrateGyro ─────────────────────────────────────────────────────────────
+void calibrateGyro() {
+  if (!mpuOnline) {
+    sendBLE("[FAIL] MPU6050 not found — cannot calibrate");
+    return;
+  }
+  const int NUM_SAMPLES     = 200;
+  const int SAMPLE_DELAY_MS = 10;
+  double    sum = 0.0;
+  sensors_event_t a, g, temp;
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    mpu.getEvent(&a, &g, &temp);
+    sum += g.gyro.z;
+    delay(SAMPLE_DELAY_MS);
+  }
+  gyroZ_offset = (float)(sum / NUM_SAMPLES);
+}
+
+// ── updateHeading ─────────────────────────────────────────────────────────────
+void updateHeading() {
+  if (!mpuOnline) return;
+
+  unsigned long now = millis();
+  float dt = (now - lastGyroTime) / 1000.0f;
+  lastGyroTime = now;
+
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  float correctedGyroZ = g.gyro.z - gyroZ_offset;
+  headingAngle += correctedGyroZ * dt * (180.0f / PI);
+
+  // Slow decay — prevents heading winding up from residual gyro noise
+  // over long drives. 0.98 per 20ms loop ~ drifts to zero over ~10 seconds
+  // if no real rotation is happening.
+  headingAngle *= 0.98f;
+}
+
+// ── driveStraightWithCorrection ───────────────────────────────────────────────
+// NOTE: If robot corrects in the WRONG direction (drifts more instead of less),
+// swap signs: leftSpeed = baseSpeed - correction, rightSpeed = baseSpeed + correction
+void driveStraightWithCorrection(int direction) {
+  updateHeading();
+
+  float error = headingAngle;
+  if (abs(error) < DEADBAND) error = 0.0f;   // ignore small noise
+
+  int correction = (int)(kP * error);
+  correction = constrain(correction, -30, 30); // tighter than before (was +-50)
+
+  if (direction == 1) {
+    // Forward
+    int leftSpeed  = baseSpeed + correction;
+    int rightSpeed = baseSpeed - correction;
+    leftSpeed  = constrain(leftSpeed,  MIN_SPEED, MAX_SPEED);
+    rightSpeed = constrain(rightSpeed, MIN_SPEED, MAX_SPEED);
+    drive(leftSpeed, rightSpeed);
+
+  } else {
+    // Reverse — also corrected
+    int leftSpeed  = -baseSpeed - correction;
+    int rightSpeed = -baseSpeed + correction;
+    leftSpeed  = constrain(leftSpeed,  -MAX_SPEED, -MIN_SPEED);
+    rightSpeed = constrain(rightSpeed, -MAX_SPEED, -MIN_SPEED);
+    drive(leftSpeed, rightSpeed);
+  }
+}
+
+// ── streamIMUData ─────────────────────────────────────────────────────────────
+void streamIMUData() {
+  if (!mpuOnline) return;
+
+  static unsigned long lastStream = 0;
+  if (millis() - lastStream < 200) return;
+  lastStream = millis();
+
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  String line1 = "Gyro  X: " + String(g.gyro.x, 4)
+               + "  Y: "     + String(g.gyro.y, 4)
+               + "  Z: "     + String(g.gyro.z, 4)
+               + " rad/s";
+
+  String line2 = "Accel X: " + String(a.acceleration.x, 3)
+               + "  Y: "     + String(a.acceleration.y, 3)
+               + "  Z: "     + String(a.acceleration.z, 3)
+               + " m/s2";
+
+  String line3 = "Heading: " + String(headingAngle, 2) + " deg"
+               + "  |  Offset: " + String(gyroZ_offset, 5);
+
+  sendBLE("---");
+  sendBLE(line1);
+  sendBLE(line2);
+  sendBLE(line3);
+}
+
+// ── reportHardwareStatus ──────────────────────────────────────────────────────
+void reportHardwareStatus() {
+  sendBLE("--- HARDWARE STATUS ---");
+  sendBLE(mpuOnline ? "[OK] MPU6050 online" : "[FAIL] MPU6050 not found");
+  sendBLE("Gyro offset: " + String(gyroZ_offset, 5) + " rad/s");
+  sendBLE("Base speed: "  + String(baseSpeed));
+  sendBLE("kP: "          + String(kP));
+  sendBLE("Deadband: "    + String(DEADBAND) + " deg");
+  sendBLE("Mode: "        + String(isAutoMode ? "AUTO" : "MANUAL"));
+  sendBLE("-----------------------");
+}
+
+// ── setup ─────────────────────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Booting...");
+
+  pinMode(LEFT_IN1,  OUTPUT);
+  pinMode(LEFT_IN2,  OUTPUT);
+  pinMode(RIGHT_IN1, OUTPUT);
+  pinMode(RIGHT_IN2, OUTPUT);
+
+  ledcAttach(LEFT_PWM,  PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
+  stopMotors();
+
+  Wire.begin(21, 22);
+  mpuOnline = mpu.begin();
+  if (mpuOnline) {
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println("MPU6050 OK");
+    delay(500);
+    calibrateGyro();
+    Serial.println("Gyro calibrated. Offset: " + String(gyroZ_offset, 5));
+  } else {
+    Serial.println("MPU6050 FAILED — check wiring (SDA=21, SCL=22, VCC=3.3V)");
+  }
+
+  BLEDevice::init("ESP32_Robot");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
+
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  pTxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_TX,
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pTxCharacteristic->addDescriptor(new BLE2902());
+
+  BLECharacteristic* pRxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_RX,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pRxCharacteristic->setCallbacks(new RxCallbacks());
+
+  pService->start();
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+
+  Serial.println("BLE advertising as 'ESP32_Robot'");
+  lastGyroTime = millis();
+}
+
+// ── loop ──────────────────────────────────────────────────────────────────────
+void loop() {
+  if (isDriving && mpuOnline && !isAutoMode) {
+    int dir = (lastDirection == 'F') ? 1 : -1;
+    driveStraightWithCorrection(dir);
+  }
+
+  if (isAutoMode && mpuOnline) {
+    driveStraightWithCorrection(1);
+  }
+
+  if (streamIMU) {
+    streamIMUData();
+  }
+
+  delay(20);   // ~50 Hz update rate
+}
