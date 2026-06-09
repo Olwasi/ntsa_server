@@ -22,7 +22,7 @@ app = Flask(__name__)
 # CONFIGURATION
 # ============================================================
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "douvonneli@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "eygd jwaa nmon jzyr")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "eygdjwaanmonjzyr")
 
 # ============================================================
 # IN-MEMORY VIOLATION STORE
@@ -84,25 +84,26 @@ def send_driver_email(violation):
         date_s       = violation["date"]
         time_s       = violation["time"]
         total_v      = violation["total_violations"]
+        offence      = violation.get("offence", "Traffic violation")
         image_b64    = violation.get("image_b64", "")
 
-        subject = f"NTSA Fine Notice \u2013 {fine_ref} \u2013 Vehicle {plate}"
+        subject = f"NTSA Fine Notice - {fine_ref} - Vehicle {plate}"
         body = f"""Dear Driver,
 
 This is an official notice from the National Transport and Safety Authority (NTSA).
 
 Your vehicle ({plate}) has been recorded committing a traffic violation.
 
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Fine Reference             : {fine_ref}
 Date                       : {date_s}
 Time                       : {time_s}
 Vehicle                    : {plate}
 Total Violations on Record : {total_v}
-Offence                    : Illegal crossing of yellow continuous centre line
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+Offence                    : {offence}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Photographic evidence of the violation is attached.
+Photographic evidence of the violation is attached (if available).
 
 NTSA Traffic Monitoring Division
 """
@@ -118,13 +119,14 @@ NTSA Traffic Monitoring Division
             msg.attach(img_part)
 
         with smtplib.SMTP("smtp.gmail.com", 587) as srv:
-    srv.ehlo()
-    srv.starttls()
-    srv.ehlo()
-    srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-    srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
+            srv.ehlo()
+            srv.starttls()
+            srv.ehlo()
+            srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
 
         print(f"[EMAIL] Sent to {driver_email} for {fine_ref}")
+
     except Exception as e:
         print(f"[EMAIL] Failed: {e}")
 
@@ -145,10 +147,11 @@ def receive_violation():
             violations[plate] = []
         violations[plate].append(data)
 
-    print(f"[SERVER] Violation received: {data.get('fine_ref')} \u2013 {plate} (session={session_v})")
+    print(f"[SERVER] Violation received: {data.get('fine_ref')} - {plate} (session={session_v})")
 
     if session_v >= 3:
-        threading.Thread(target=send_driver_email, args=(data,), daemon=True).start()
+        print(f"[EMAIL] Attempting to send for {data.get('fine_ref')}...")
+        send_driver_email(data)  # called directly, no thread
 
     return jsonify({"status": "ok"}), 200
 
@@ -203,7 +206,7 @@ body {
   min-height: 100vh;
 }
 
-/* ── HEADER ── */
+/* HEADER */
 header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -282,7 +285,7 @@ header::after {
   letter-spacing: 2px;
 }
 
-/* ── SUBHEADER BAND ── */
+/* SUBHEADER BAND */
 .subband {
   background: var(--navy);
   padding: 7px 40px;
@@ -300,10 +303,10 @@ header::after {
 .subband .hot { color: var(--red); }
 .subband .sep { color: #2e3d52; }
 
-/* ── MAIN ── */
+/* MAIN */
 main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
 
-/* ── STAT CARDS ── */
+/* STAT CARDS */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -348,7 +351,7 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   margin-top: 6px;
 }
 
-/* ── PANELS ── */
+/* PANELS */
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -392,7 +395,7 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   text-transform: uppercase;
 }
 
-/* ── GRID LAYOUTS ── */
+/* GRID LAYOUTS */
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -406,11 +409,8 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   margin-bottom: 18px;
 }
 
-/* ── MAP ── */
-#map {
-  height: 280px;
-  width: 100%;
-}
+/* MAP */
+#map { height: 280px; width: 100%; }
 .leaflet-container { background: #dce6f0; }
 .leaflet-popup-content-wrapper {
   background: var(--surface);
@@ -428,7 +428,7 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
 }
 .leaflet-popup-tip { background: var(--surface); }
 
-/* ── CHART ── */
+/* CHART */
 .chart-body {
   padding: 18px 20px;
   height: 280px;
@@ -436,7 +436,7 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   align-items: center;
 }
 
-/* ── REGIONAL BARS ── */
+/* REGIONAL BARS */
 .region-list { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
 .ritem {
   display: flex;
@@ -447,9 +447,9 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   border: 1px solid var(--border);
   border-left: 3px solid var(--red);
 }
-.ritem.amb { border-left-color: var(--amb); }
-.ritem.blu { border-left-color: var(--blu); }
-.ritem.grn { border-left-color: #006600; }
+.ritem.amb  { border-left-color: var(--amb); }
+.ritem.blu  { border-left-color: var(--blu); }
+.ritem.grn  { border-left-color: #006600; }
 .ritem.grey { border-left-color: var(--t3); }
 .rname {
   font-family: var(--fh);
@@ -468,11 +468,11 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   overflow: hidden;
 }
 .rbar { height: 100%; border-radius: 2px; transition: width 1s ease; }
-.rbar.red   { background: var(--red); }
-.rbar.amb   { background: var(--amb); }
-.rbar.blu   { background: var(--blu); }
-.rbar.grn   { background: #006600; }
-.rbar.grey  { background: var(--t3); }
+.rbar.red  { background: var(--red); }
+.rbar.amb  { background: var(--amb); }
+.rbar.blu  { background: var(--blu); }
+.rbar.grn  { background: #006600; }
+.rbar.grey { background: var(--t3); }
 .rnum {
   font-family: var(--fd);
   font-size: 12px;
@@ -486,10 +486,10 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
 .rnum.grn  { color: #006600; }
 .rnum.grey { color: var(--t3); }
 
-/* ── DOUGHNUT PANEL ── */
+/* DOUGHNUT */
 .doughnut-body { padding: 16px 20px; height: 260px; display: flex; align-items: center; justify-content: center; }
 
-/* ── VIOLATION TABLE ── */
+/* VIOLATION TABLE */
 .tabs-bar {
   padding: 10px 14px;
   background: #f7f9fb;
@@ -511,7 +511,7 @@ main { padding: 24px 40px 40px; max-width: 1600px; margin: 0 auto; }
   border-radius: 2px;
   transition: all 0.15s;
 }
-.tab-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-bg); }
+.tab-btn:hover  { border-color: var(--red); color: var(--red); background: var(--red-bg); }
 .tab-btn.active { background: var(--red-bg); border-color: var(--red-bd); color: var(--red); }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -529,11 +529,7 @@ thead th {
 }
 tbody tr { border-bottom: 1px solid #f0f2f5; transition: background 0.12s; }
 tbody tr:hover { background: #f7f9fb; }
-tbody td {
-  padding: 11px 16px;
-  color: var(--t2);
-  vertical-align: middle;
-}
+tbody td { padding: 11px 16px; color: var(--t2); vertical-align: middle; }
 .mono {
   font-family: var(--fd);
   font-size: 10px;
@@ -584,7 +580,7 @@ tbody td {
   text-transform: uppercase;
 }
 
-/* ── MODAL ── */
+/* MODAL */
 #modal {
   display: none;
   position: fixed;
@@ -613,7 +609,7 @@ tbody td {
 }
 #modal-close:hover { opacity: 1; }
 
-/* ── FOOTER ── */
+/* FOOTER */
 footer {
   background: var(--navy);
   text-align: center;
@@ -636,9 +632,7 @@ footer span { margin: 0 10px; }
 </head>
 <body>
 
-<!-- HEADER -->
 <header>
-  <!-- NTSA Shield -->
   <svg class="logo-shield" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
     <circle cx="100" cy="100" r="97" fill="#006600" stroke="#ccc" stroke-width="3"/>
     <circle cx="100" cy="100" r="80" fill="#fff"/>
@@ -657,15 +651,11 @@ footer span { margin: 0 10px; }
     <p>Traffic Violation Enforcement &bull; Real-Time Dashboard</p>
   </div>
   <div class="header-right">
-    <div class="live-pill">
-      <div class="live-dot"></div>
-      Live
-    </div>
+    <div class="live-pill"><div class="live-dot"></div>Live</div>
     <div class="clock" id="clock">--:--:--</div>
   </div>
 </header>
 
-<!-- SUBHEADER BAND -->
 <div class="subband">
   <span>Session Active</span>
   <span class="sep">&bull;</span>
@@ -679,8 +669,6 @@ footer span { margin: 0 10px; }
 </div>
 
 <main>
-
-  <!-- STAT CARDS -->
   <div class="stats-grid">
     <div class="stat danger">
       <div class="stat-label">Fines Issued</div>
@@ -704,44 +692,27 @@ footer span { margin: 0 10px; }
     </div>
   </div>
 
-  <!-- MAP + BAR CHART -->
   <div class="grid-2">
-
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-left">
-          <div class="ph-dot blu"></div>
-          <span class="panel-title">Kenyan Road Network &mdash; Nairobi</span>
-        </div>
+        <div class="panel-head-left"><div class="ph-dot blu"></div><span class="panel-title">Kenyan Road Network &mdash; Nairobi</span></div>
         <span class="panel-meta">Interactive Map</span>
       </div>
       <div id="map"></div>
     </div>
-
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-left">
-          <div class="ph-dot amb"></div>
-          <span class="panel-title">Violations Per Vehicle</span>
-        </div>
+        <div class="panel-head-left"><div class="ph-dot amb"></div><span class="panel-title">Violations Per Vehicle</span></div>
         <span class="panel-meta">Current Session</span>
       </div>
-      <div class="chart-body">
-        <canvas id="barChart"></canvas>
-      </div>
+      <div class="chart-body"><canvas id="barChart"></canvas></div>
     </div>
-
   </div>
 
-  <!-- REGIONAL + DOUGHNUT -->
   <div class="grid-bottom">
-
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-left">
-          <div class="ph-dot grn"></div>
-          <span class="panel-title">Regional Activity</span>
-        </div>
+        <div class="panel-head-left"><div class="ph-dot grn"></div><span class="panel-title">Regional Activity</span></div>
       </div>
       <div class="region-list">
         <div class="ritem">
@@ -749,82 +720,39 @@ footer span { margin: 0 10px; }
           <div class="rbar-wrap"><div class="rbar red" style="width:{{ nairobi_pct }}%"></div></div>
           <div class="rnum red">{{ nairobi_v }}</div>
         </div>
-        <div class="ritem amb">
-          <div class="rname">Mombasa</div>
-          <div class="rbar-wrap"><div class="rbar amb" style="width:0%"></div></div>
-          <div class="rnum amb">0</div>
-        </div>
-        <div class="ritem blu">
-          <div class="rname">Kisumu</div>
-          <div class="rbar-wrap"><div class="rbar blu" style="width:0%"></div></div>
-          <div class="rnum blu">0</div>
-        </div>
-        <div class="ritem grn">
-          <div class="rname">Nakuru</div>
-          <div class="rbar-wrap"><div class="rbar grn" style="width:0%"></div></div>
-          <div class="rnum grn">0</div>
-        </div>
-        <div class="ritem grey">
-          <div class="rname">Eldoret</div>
-          <div class="rbar-wrap"><div class="rbar grey" style="width:0%"></div></div>
-          <div class="rnum grey">0</div>
-        </div>
-        <div class="ritem grey">
-          <div class="rname">Thika</div>
-          <div class="rbar-wrap"><div class="rbar grey" style="width:0%"></div></div>
-          <div class="rnum grey">0</div>
-        </div>
+        <div class="ritem amb"><div class="rname">Mombasa</div><div class="rbar-wrap"><div class="rbar amb" style="width:0%"></div></div><div class="rnum amb">0</div></div>
+        <div class="ritem blu"><div class="rname">Kisumu</div><div class="rbar-wrap"><div class="rbar blu" style="width:0%"></div></div><div class="rnum blu">0</div></div>
+        <div class="ritem grn"><div class="rname">Nakuru</div><div class="rbar-wrap"><div class="rbar grn" style="width:0%"></div></div><div class="rnum grn">0</div></div>
+        <div class="ritem grey"><div class="rname">Eldoret</div><div class="rbar-wrap"><div class="rbar grey" style="width:0%"></div></div><div class="rnum grey">0</div></div>
+        <div class="ritem grey"><div class="rname">Thika</div><div class="rbar-wrap"><div class="rbar grey" style="width:0%"></div></div><div class="rnum grey">0</div></div>
       </div>
     </div>
-
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-left">
-          <div class="ph-dot red"></div>
-          <span class="panel-title">Offence Breakdown</span>
-        </div>
+        <div class="panel-head-left"><div class="ph-dot red"></div><span class="panel-title">Offence Breakdown</span></div>
       </div>
-      <div class="doughnut-body">
-        <canvas id="doughnutChart"></canvas>
-      </div>
+      <div class="doughnut-body"><canvas id="doughnutChart"></canvas></div>
     </div>
-
   </div>
 
-  <!-- VIOLATION LOG -->
   <div class="panel">
     <div class="panel-head">
-      <div class="panel-head-left">
-        <div class="ph-dot red"></div>
-        <span class="panel-title">Violation Log</span>
-      </div>
-      <span class="panel-meta">
-        {{ total_fines + total_warnings }} Records
-      </span>
+      <div class="panel-head-left"><div class="ph-dot red"></div><span class="panel-title">Violation Log</span></div>
+      <span class="panel-meta">{{ total_fines + total_warnings }} Records</span>
     </div>
     <div class="tabs-bar" id="tabs">
       {% for plate in plates %}
-      <button class="tab-btn {% if loop.first %}active{% endif %}"
-              onclick="showTab('{{ plate }}', this)">{{ plate }}</button>
+      <button class="tab-btn {% if loop.first %}active{% endif %}" onclick="showTab('{{ plate }}', this)">{{ plate }}</button>
       {% endfor %}
     </div>
-
     {% for plate, v_list in all_violations.items() %}
-    <div class="table-scroll tab-content"
-         id="tab-{{ plate }}"
-         {% if not loop.first %}style="display:none"{% endif %}>
+    <div class="table-scroll tab-content" id="tab-{{ plate }}" {% if not loop.first %}style="display:none"{% endif %}>
       {% if v_list %}
       <table>
         <thead>
           <tr>
-            <th>Fine Reference</th>
-            <th>Date</th>
-            <th>Time</th>
-            <th>Offence</th>
-            <th>Session</th>
-            <th>Total</th>
-            <th>Status</th>
-            <th>Evidence</th>
+            <th>Fine Reference</th><th>Date</th><th>Time</th><th>Offence</th>
+            <th>Session</th><th>Total</th><th>Status</th><th>Evidence</th>
           </tr>
         </thead>
         <tbody>
@@ -847,10 +775,7 @@ footer span { margin: 0 10px; }
             </td>
             <td>
               {% if v.image_b64 %}
-                <img class="thumb"
-                     src="data:image/jpeg;base64,{{ v.image_b64 }}"
-                     onclick="openModal(this.src)"
-                     alt="evidence">
+                <img class="thumb" src="data:image/jpeg;base64,{{ v.image_b64 }}" onclick="openModal(this.src)" alt="evidence">
               {% else %}
                 <div class="no-img">No Image</div>
               {% endif %}
@@ -865,10 +790,8 @@ footer span { margin: 0 10px; }
     </div>
     {% endfor %}
   </div>
-
 </main>
 
-<!-- MODAL -->
 <div id="modal" onclick="closeModal()">
   <span id="modal-close" onclick="closeModal()">&times;</span>
   <img id="modal-img" src="" alt="evidence full">
@@ -885,140 +808,61 @@ footer span { margin: 0 10px; }
 </footer>
 
 <script>
-/* ── CLOCK ── */
 function tick() {
   const n = new Date();
-  const s = n.getHours().toString().padStart(2,'0') + ':' +
-            n.getMinutes().toString().padStart(2,'0') + ':' +
-            n.getSeconds().toString().padStart(2,'0');
-  document.getElementById('clock').textContent = s;
+  document.getElementById('clock').textContent =
+    n.getHours().toString().padStart(2,'0') + ':' +
+    n.getMinutes().toString().padStart(2,'0') + ':' +
+    n.getSeconds().toString().padStart(2,'0');
 }
 tick(); setInterval(tick, 1000);
 
-/* ── LEAFLET MAP ── */
-const map = L.map('map', { zoomControl: true, attributionControl: false })
-             .setView([-1.286389, 36.817223], 12);
-
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd', maxZoom: 19
-}).addTo(map);
-
-const redDot = L.divIcon({
-  className: '',
-  html: `<div style="width:13px;height:13px;background:#c8102e;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 6px rgba(200,16,46,0.5);"></div>`,
-  iconSize: [13,13], iconAnchor: [6,6]
-});
-const ambDot = L.divIcon({
-  className: '',
-  html: `<div style="width:10px;height:10px;background:#d4870a;border:2px solid #fff;border-radius:50%;"></div>`,
-  iconSize: [10,10], iconAnchor: [5,5]
-});
-
-/* Violation markers */
+const map = L.map('map', { zoomControl: true, attributionControl: false }).setView([-1.286389, 36.817223], 12);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19 }).addTo(map);
+const redDot = L.divIcon({ className: '', html: `<div style="width:13px;height:13px;background:#c8102e;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 6px rgba(200,16,46,0.5);"></div>`, iconSize: [13,13], iconAnchor: [6,6] });
+const ambDot = L.divIcon({ className: '', html: `<div style="width:10px;height:10px;background:#d4870a;border:2px solid #fff;border-radius:50%;"></div>`, iconSize: [10,10], iconAnchor: [5,5] });
 [
-  { lat:-1.2921, lng:36.8219, icon:redDot,
-    html:"<strong>KAA123B</strong><br>Fine &mdash; Yellow Line<br><span style='color:#8a96a8'>09:47:10</span>" },
-  { lat:-1.3031, lng:36.8100, icon:ambDot,
-    html:"<strong>KBQ987D</strong><br>Warning<br><span style='color:#8a96a8'>11:02:55</span>" },
-].forEach(p => {
-  L.marker([p.lat, p.lng], { icon: p.icon })
-   .addTo(map)
-   .bindPopup(p.html);
-});
+  { lat:-1.2921, lng:36.8219, icon:redDot, html:"<strong>KAA123B</strong><br>Fine &mdash; Yellow Line<br><span style='color:#8a96a8'>09:47:10</span>" },
+  { lat:-1.3031, lng:36.8100, icon:ambDot, html:"<strong>KBQ987D</strong><br>Warning<br><span style='color:#8a96a8'>11:02:55</span>" },
+].forEach(p => L.marker([p.lat, p.lng], { icon: p.icon }).addTo(map).bindPopup(p.html));
+L.circle([-1.286389, 36.817223], { radius: 1800, color: '#c8102e', weight: 1, fill: true, fillColor: '#c8102e', fillOpacity: 0.04, dashArray: '5 8' }).addTo(map).bindPopup("Nairobi Monitoring Zone");
 
-/* Dashed zone ring */
-L.circle([-1.286389, 36.817223], {
-  radius: 1800, color: '#c8102e', weight: 1,
-  fill: true, fillColor: '#c8102e', fillOpacity: 0.04,
-  dashArray: '5 8'
-}).addTo(map).bindPopup("Nairobi Monitoring Zone");
-
-/* ── BAR CHART ── */
 new Chart(document.getElementById('barChart').getContext('2d'), {
   type: 'bar',
   data: {
     labels: {{ chart_labels | tojson }},
     datasets: [
-      {
-        label: 'Fines',
-        data: {{ chart_fines | tojson }},
-        backgroundColor: 'rgba(200,16,46,0.8)',
-        borderColor: '#c8102e',
-        borderWidth: 1,
-        borderRadius: 2,
-      },
-      {
-        label: 'Warnings',
-        data: {{ chart_warnings | tojson }},
-        backgroundColor: 'rgba(179,107,0,0.75)',
-        borderColor: '#b36b00',
-        borderWidth: 1,
-        borderRadius: 2,
-      }
+      { label: 'Fines', data: {{ chart_fines | tojson }}, backgroundColor: 'rgba(200,16,46,0.8)', borderColor: '#c8102e', borderWidth: 1, borderRadius: 2 },
+      { label: 'Warnings', data: {{ chart_warnings | tojson }}, backgroundColor: 'rgba(179,107,0,0.75)', borderColor: '#b36b00', borderWidth: 1, borderRadius: 2 }
     ]
   },
   options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: {
-          color: '#8a96a8',
-          font: { family: 'DM Mono', size: 11 },
-          boxWidth: 10, boxHeight: 10,
-        }
-      }
-    },
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8a96a8', font: { family: 'DM Mono', size: 11 }, boxWidth: 10, boxHeight: 10 } } },
     scales: {
-      x: {
-        ticks: { color: '#8a96a8', font: { family: 'DM Mono', size: 11 } },
-        grid: { color: '#f0f2f5' },
-      },
-      y: {
-        ticks: { color: '#8a96a8', font: { family: 'DM Mono', size: 11 }, stepSize: 1 },
-        grid: { color: '#f0f2f5' },
-        beginAtZero: true,
-      }
+      x: { ticks: { color: '#8a96a8', font: { family: 'DM Mono', size: 11 } }, grid: { color: '#f0f2f5' } },
+      y: { ticks: { color: '#8a96a8', font: { family: 'DM Mono', size: 11 }, stepSize: 1 }, grid: { color: '#f0f2f5' }, beginAtZero: true }
     }
   }
 });
 
-/* ── DOUGHNUT CHART ── */
 new Chart(document.getElementById('doughnutChart').getContext('2d'), {
   type: 'doughnut',
   data: {
     labels: ['Yellow Line Fines', 'Yellow Line Warnings', 'Reckless Lane Hopping', 'Exceptions'],
     datasets: [{
       data: [{{ total_fines }}, {{ total_warnings }}, 0, 0],
-      backgroundColor: [
-        'rgba(200,16,46,0.85)',
-        'rgba(179,107,0,0.85)',
-        'rgba(26,110,181,0.85)',
-        'rgba(26,122,60,0.85)',
-      ],
+      backgroundColor: ['rgba(200,16,46,0.85)','rgba(179,107,0,0.85)','rgba(26,110,181,0.85)','rgba(26,122,60,0.85)'],
       borderColor: ['#c8102e','#b36b00','#1a6eb5','#1a7a3c'],
-      borderWidth: 1,
-      hoverOffset: 5,
+      borderWidth: 1, hoverOffset: 5,
     }]
   },
   options: {
-    responsive: true,
-    maintainAspectRatio: true,
-    cutout: '58%',
-    plugins: {
-      legend: {
-        position: 'bottom',
-        labels: {
-          color: '#8a96a8',
-          font: { family: 'DM Mono', size: 10 },
-          boxWidth: 10, boxHeight: 10, padding: 14,
-        }
-      }
-    }
+    responsive: true, maintainAspectRatio: true, cutout: '58%',
+    plugins: { legend: { position: 'bottom', labels: { color: '#8a96a8', font: { family: 'DM Mono', size: 10 }, boxWidth: 10, boxHeight: 10, padding: 14 } } }
   }
 });
 
-/* ── TABS ── */
 function showTab(plate, el) {
   document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
   document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
@@ -1029,21 +873,11 @@ function showTab(plate, el) {
 }
 window.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('ntsa_tab');
-  if (saved) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      if (btn.textContent.trim() === saved) showTab(saved, btn);
-    });
-  }
+  if (saved) document.querySelectorAll('.tab-btn').forEach(btn => { if (btn.textContent.trim() === saved) showTab(saved, btn); });
 });
 
-/* ── MODAL ── */
-function openModal(src) {
-  document.getElementById('modal-img').src = src;
-  document.getElementById('modal').classList.add('open');
-}
-function closeModal() {
-  document.getElementById('modal').classList.remove('open');
-}
+function openModal(src) { document.getElementById('modal-img').src = src; document.getElementById('modal').classList.add('open'); }
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 </script>
 </body>
@@ -1058,17 +892,16 @@ def dashboard():
     with store_lock:
         all_v = dict(violations)
 
-    plates        = list(all_v.keys())
-    chart_fines   = []
+    plates         = list(all_v.keys())
+    chart_fines    = []
     chart_warnings = []
-    total_fines   = 0
+    total_fines    = 0
     total_warnings = 0
-    nairobi_v     = 0
+    nairobi_v      = 0
 
     for plate in plates:
-        fines    = sum(1 for v in all_v[plate]
-                       if v["session_violations"] >= 3 and "EXCPT" not in v.get("fine_ref",""))
-        warns    = sum(1 for v in all_v[plate] if v["session_violations"] < 3)
+        fines  = sum(1 for v in all_v[plate] if v["session_violations"] >= 3 and "EXCPT" not in v.get("fine_ref",""))
+        warns  = sum(1 for v in all_v[plate] if v["session_violations"] < 3)
         chart_fines.append(fines)
         chart_warnings.append(warns)
         total_fines    += fines
