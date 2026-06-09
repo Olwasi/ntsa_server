@@ -163,7 +163,7 @@ def receive_violation():
 
     if session_v >= 3:
         print(f"[EMAIL] Attempting to send for {data.get('fine_ref')}...")
-        send_driver_email(data)  # called directly, no thread
+        threading.Thread(target=send_driver_email, args=(data,), daemon=False).start()
 
     return jsonify({"status": "ok"}), 200
 
@@ -941,6 +941,19 @@ def dashboard():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"}), 200
+
+def _keep_alive():
+    import requests as req
+    import time as t
+    while True:
+        t.sleep(840)
+        try:
+            req.get("https://ntsa-server.onrender.com/health", timeout=10)
+            print("[KEEPALIVE] pinged")
+        except Exception as e:
+            print(f"[KEEPALIVE] Failed: {e}")
+
+threading.Thread(target=_keep_alive, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
