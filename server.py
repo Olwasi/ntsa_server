@@ -87,6 +87,17 @@ def send_driver_email(violation):
         offence      = violation.get("offence", "Traffic violation")
         image_b64    = violation.get("image_b64", "")
 
+        if "RECKLESS" in fine_ref:
+            fine_amount = "KES 5,000"
+        elif "NTSA" in fine_ref:
+            fine_amount = "KES 3,000"
+        elif "WARN" in fine_ref:
+            fine_amount = "KES 0 (Warning — no charge)"
+        elif "EXCPT" in fine_ref:
+            fine_amount = "KES 0 (Exception — no charge)"
+        else:
+            fine_amount = "KES 3,000"
+
         subject = f"NTSA Fine Notice - {fine_ref} - Vehicle {plate}"
         body = f"""Dear Driver,
 
@@ -99,8 +110,9 @@ Fine Reference             : {fine_ref}
 Date                       : {date_s}
 Time                       : {time_s}
 Vehicle                    : {plate}
-Total Violations on Record : {total_v}
 Offence                    : {offence}
+Amount Payable             : {fine_amount}
+Total Violations on Record : {total_v}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Photographic evidence of the violation is attached (if available).
