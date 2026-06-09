@@ -117,9 +117,12 @@ NTSA Traffic Monitoring Division
             img_part  = MIMEImage(img_bytes, name=f"evidence_{fine_ref}.jpg")
             msg.attach(img_part)
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
-            srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
+        with smtplib.SMTP("smtp.gmail.com", 587) as srv:
+    srv.ehlo()
+    srv.starttls()
+    srv.ehlo()
+    srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+    srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
 
         print(f"[EMAIL] Sent to {driver_email} for {fine_ref}")
     except Exception as e:
