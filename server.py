@@ -8,12 +8,9 @@ NTSA Lane Violation Cloud Server
 
 import os
 import base64
-import smtplib
 import datetime
 import threading
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
+import resend
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
@@ -21,8 +18,8 @@ app = Flask(__name__)
 # ============================================================
 # CONFIGURATION
 # ============================================================
-GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "douvonneli@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "eygdjwaanmonjzyr")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+SENDER_EMAIL   = "onboarding@resend.dev"
 
 # ============================================================
 # IN-MEMORY VIOLATION STORE
@@ -119,22 +116,22 @@ Photographic evidence of the violation is attached (if available).
 
 NTSA Traffic Monitoring Division
 """
-        msg = MIMEMultipart()
-        msg["From"]    = GMAIL_ADDRESS
-        msg["To"]      = driver_email
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
+        resend.api_key = RESEND_API_KEY
+
+        params = {
+            "from": f"NTSA Monitoring <{SENDER_EMAIL}>",
+            "to": [driver_email],
+            "subject": subject,
+            "text": body,
+        }
 
         if image_b64:
-            img_bytes = base64.b64decode(image_b64)
-            img_part  = MIMEImage(img_bytes, name=f"evidence_{fine_ref}.jpg")
-            msg.attach(img_part)
+            params["attachments"] = [{
+                "filename": f"evidence_{fine_ref}.jpg",
+                "content": image_b64,
+            }]
 
-        with smtplib.SMTP("smtp.gmail.com", 587) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            srv.sendmail(GMAIL_ADDRESS, driver_email, msg.as_string())
+        resend.Emails.send(params)
 
         print(f"[EMAIL] Sent to {driver_email} for {fine_ref}")
 
